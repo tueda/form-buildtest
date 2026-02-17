@@ -1,0 +1,91 @@
+name: Build
+
+on:
+  pull_request:
+  push:
+  schedule:
+    - cron: 0 0 1 * *  # monthly
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ${{ matrix.image }}
+    runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: ubuntu:rolling
+            install: >-
+              apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends
+              build-essential
+              curl
+              libflint-dev
+              libgmp-dev
+              libmpfr-dev
+              libzstd-dev
+              ruby
+              zlib1g-dev
+          - image: fedora:latest
+            install: >-
+              dnf install -y
+              flint-devel
+              free
+              gcc-c++
+              gmp-devel
+              libzstd-devel
+              make
+              mpfr-devel
+              ruby
+              rubygem-test-unit
+              zlib-devel
+    env:
+      FORM_VERSION: 5.0.0
+    steps:
+      - name: Install dependencies
+        run: |
+          set -euo pipefail
+          (. /etc/os-release && echo "$NAME $VERSION_ID") 2>&1 | tee os-release.log
+          ${{ matrix.install }}
+
+      - name: Build and test
+        run: |
+          set -euo pipefail
+          curl -LO https://github.com/form-dev/form/releases/download/v${{ env.FORM_VERSION }}/form-${{ env.FORM_VERSION }}.tar.gz
+          tar -xvf form-${{ env.FORM_VERSION }}.tar.gz
+          cd form-${{ env.FORM_VERSION }}
+          ./configure
+          make -j "$(nproc)"
+          make check 2>&1 | tee ../make-check.log
+          make install
+          cd ..
+          form -vv 2>&1 | tee form-vv.log
+          tform -vv 2>&1 | tee tform-vv.log
+
+      - name: Check
+        run: |
+          set -euo pipefail
+          check_log() {
+            local search="$1"
+            local file="$2"
+            grep -Fq -- "$search" "$file" || {
+              echo "Error: '$search' not found in $file" >&2
+              exit 1
+            }
+          }
+          check_log 'All 2 tests passed' make-check.log
+          check_log +flint form-vv.log
+          check_log +float form-vv.log
+          check_log +gmp form-vv.log
+          check_log +mpfr form-vv.log
+          check_log -pthreads form-vv.log
+          check_log +zlib form-vv.log
+          check_log +zstd form-vv.log
+          check_log +flint tform-vv.log
+          check_log +float tform-vv.log
+          check_log +gmp tform-vv.log
+          check_log +mpfr tform-vv.log
+          check_log +pthreads tform-vv.log
+          check_log +zlib tform-vv.log
+          check_log +zstd tform-vv.log
