@@ -1,0 +1,60 @@
+name: Build
+
+on:
+  pull_request:
+  push:
+  schedule:
+    - cron: 0 0 1 * *  # monthly
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ${{ matrix.image }}
+    runs-on: ubuntu-latest
+    container: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: ubuntu:rolling
+            install: >
+              sudo apt-get update &&
+              DEBIAN_FRONTEND=noninteractive sudo apt-get install -y --no-install-recommends
+                build-essential
+                libflint-dev
+                libgmp-dev
+                libmpfr-dev
+                libzstd-dev
+                ruby
+                zlib1g-dev
+          - image: fedora:latest
+            install: >
+              sudo dnf install -y
+                gcc-c++
+                gmp-devel
+                libzstd-devel
+                make
+                mpfr-devel
+                ruby
+                rubygem-test-unit
+                zlib-devel
+    env:
+      FORM_VERSION: 5.0.0
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: ${{ matrix.install }}
+
+      - name: Build and test
+        run: |
+          curl -LO https://github.com/form-dev/form/releases/download/v${{ env.FORM_VERSION }}/form-${{ env.FORM_VERSION }}.tar.gz
+          tar -xvf form-${{ env.FORM_VERSION }}.tar.gz
+          cd form-${{ env.FORM_VERSION }}
+          ./configure
+          make -j "$(nproc)"
+          make check >(tee check.out) 2> >(tee check.err >&2)
+          sudo make install
+          form -vv >(tee form.out) 2> >(tee form.err >&2)
+          tform -vv >(tee tform.out) 2> >(tee tform.err >&2)
